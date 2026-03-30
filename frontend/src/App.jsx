@@ -11,6 +11,7 @@ export default function App() {
 	const [message, setMessage] = useState("");
 	const [threadList, setThreadList] = useState([]);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
+	const [isLoading, setIsLoading] = useState(false);
 
 	const toggleSidebar = useCallback(() => setSidebarOpen((prev) => !prev), []);
 	const closeSidebar = useCallback(() => setSidebarOpen(false), []);
@@ -63,6 +64,7 @@ export default function App() {
 					activeId={threadId}
 					messages={messages}
 					setMessages={setMessages}
+					isLoading={isLoading}
 				/>
 				<InputBox
 					message={message}
@@ -72,6 +74,8 @@ export default function App() {
 					messages={messages}
 					setMessages={setMessages}
 					setThreadList={setThreadList}
+					isLoading={isLoading}
+					setIsLoading={setIsLoading}
 				/>
 			</div>
 		</div>
