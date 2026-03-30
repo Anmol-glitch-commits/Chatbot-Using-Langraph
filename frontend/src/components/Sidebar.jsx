@@ -119,7 +119,7 @@ export default function Sidebar({
 								<span className="sidebar-item-title">{thread.message}</span>
 								<span className="sidebar-item-preview">{thread.aiMessage}</span>
 							</div>
-							<button
+							<div
 								className="sidebar-item-delete"
 								title="Delete thread"
 								onClick={(e) => handleDeleteThread(e, thread.id)}
@@ -138,7 +138,7 @@ export default function Sidebar({
 									<path d="M14 11v6" />
 									<path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
 								</svg>
-							</button>
+							</div>
 						</button>
 					);
 				})}

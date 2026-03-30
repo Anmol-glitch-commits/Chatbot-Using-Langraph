@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useRef } from "react";
 import { createThread, sendMessage, uploadPdf } from "../api/api";
 
 export default function InputBox({
@@ -8,8 +8,9 @@ export default function InputBox({
 	setThreadId,
 	setMessages,
 	setThreadList,
+	isLoading,
+	setIsLoading,
 }) {
-	const [isLoading, setIsLoading] = useState(false);
 	const fileInputRef = useRef(null);
 
 	async function handleSubmit(e) {
@@ -60,6 +61,17 @@ export default function InputBox({
 					timestamp: res.ai_timestamp || new Date().toISOString(),
 				},
 			]);
+
+			// Move the active thread to the top of the sidebar
+			if (activeId) {
+				setThreadList((prev) => {
+					const thread = prev.find((t) => t.id === activeId);
+					if (thread) {
+						return [thread, ...prev.filter((t) => t.id !== activeId)];
+					}
+					return prev;
+				});
+			}
 		} catch (error) {
 			console.error(error);
 			// Remove the optimistic user message on error

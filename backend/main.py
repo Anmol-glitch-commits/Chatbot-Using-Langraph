@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from database import delete_thread
-from database import retrieve_all_threads, thread_document_metadata
+from database import retrieve_all_threads, thread_document_metadata, save_timestamp, get_timestamps
 from graph import get_chat_bot
 from pdf_ingestion import ingest_pdf, _THREAD_METADATA
 
@@ -21,9 +21,6 @@ app.add_middleware(
 )
 
 chatbot = get_chat_bot()
-
-# In-memory store: thread_id -> list of {"role": str, "timestamp": str}
-_THREAD_TIMESTAMPS: dict[str, list[dict]] = {}
 
 
 class ChatMessage(BaseModel):
@@ -61,15 +58,9 @@ async def chat(message: ChatMessage):
     response = chatbot.invoke({"messages": messages}, config=config)
     ai_timestamp = datetime.now(timezone.utc).isoformat()
 
-    # Store timestamps for this thread
-    if message.thread_id not in _THREAD_TIMESTAMPS:
-        _THREAD_TIMESTAMPS[message.thread_id] = []
-    _THREAD_TIMESTAMPS[message.thread_id].append(
-        {"role": "user", "timestamp": user_timestamp}
-    )
-    _THREAD_TIMESTAMPS[message.thread_id].append(
-        {"role": "assistant", "timestamp": ai_timestamp}
-    )
+    # Persist timestamps to SQLite
+    save_timestamp(message.thread_id, "user", user_timestamp)
+    save_timestamp(message.thread_id, "assistant", ai_timestamp)
 
     return {
         "response": response["messages"][-1].content,
@@ -120,7 +111,7 @@ async def get_thread_messages(thread_id: str):
         return {"messages": []}
 
     all_messages = state.values["messages"]
-    stored_timestamps = _THREAD_TIMESTAMPS.get(thread_id, [])
+    stored_timestamps = get_timestamps(thread_id)
 
     list_of_messages = []
     ts_index = 0  # Track position in stored timestamps
@@ -163,6 +154,5 @@ async def get_thread_messages(thread_id: str):
 @app.delete("/api/threads/{thread_id}")
 async def remove_thread(thread_id: str):
     delete_thread(thread_id)
-    _THREAD_TIMESTAMPS.pop(thread_id, None)
 
     return {"message": "Thread deleted successfully"}
