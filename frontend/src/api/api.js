@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
-	baseURL: "http://localhost:8000/api",
+	baseURL: "https://chatbot-backend-fastapi-production.up.railway.app/api",
 });
 
 export async function sendMessage(message, thread_id) {
