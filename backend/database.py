@@ -1,32 +1,45 @@
 """
-SQLite checkpointer and thread helper functions.
+PostgreSQL checkpointer and thread helper functions.
 Standalone module — no circular deps.
 """
 
-import sqlite3
+import os
 
-from langgraph.checkpoint.sqlite import SqliteSaver
+from psycopg_pool import ConnectionPool
+from langgraph.checkpoint.postgres import PostgresSaver
+from dotenv import load_dotenv
 
 from pdf_ingestion import _THREAD_METADATA, _THREAD_RETRIEVERS
+
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is required")
+
+# -------------------
+# Connection pool (each request gets its own connection — no prepared-statement conflicts)
+# -------------------
+pool = ConnectionPool(DATABASE_URL, min_size=2, max_size=10, kwargs={"autocommit": True})
 
 # -------------------
 # Checkpointer
 # -------------------
-conn = sqlite3.connect(database="chatbot.db", check_same_thread=False)
-checkpointer = SqliteSaver(conn=conn)
+checkpointer = PostgresSaver(pool)
+checkpointer.setup()
 
 # -------------------
 # Message timestamps table
 # -------------------
-conn.execute("""
-    CREATE TABLE IF NOT EXISTS message_timestamps (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        thread_id TEXT NOT NULL,
-        role TEXT NOT NULL,
-        timestamp TEXT NOT NULL
-    )
-""")
-conn.commit()
+with pool.connection() as conn:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS message_timestamps (
+            id SERIAL PRIMARY KEY,
+            thread_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            timestamp TEXT NOT NULL
+        )
+    """)
 
 
 # -------------------
@@ -34,20 +47,21 @@ conn.commit()
 # -------------------
 def save_timestamp(thread_id: str, role: str, timestamp: str):
     """Persist a single message timestamp to the database."""
-    conn.execute(
-        "INSERT INTO message_timestamps (thread_id, role, timestamp) VALUES (?, ?, ?)",
-        (thread_id, role, timestamp),
-    )
-    conn.commit()
+    with pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO message_timestamps (thread_id, role, timestamp) VALUES (%s, %s, %s)",
+            (thread_id, role, timestamp),
+        )
 
 
 def get_timestamps(thread_id: str) -> list[dict]:
     """Return all timestamps for a thread, ordered by insertion order."""
-    cursor = conn.execute(
-        "SELECT role, timestamp FROM message_timestamps WHERE thread_id = ? ORDER BY id",
-        (thread_id,),
-    )
-    return [{"role": row[0], "timestamp": row[1]} for row in cursor.fetchall()]
+    with pool.connection() as conn:
+        cursor = conn.execute(
+            "SELECT role, timestamp FROM message_timestamps WHERE thread_id = %s ORDER BY id",
+            (thread_id,),
+        )
+        return [{"role": row[0], "timestamp": row[1]} for row in cursor.fetchall()]
 
 
 # -------------------
@@ -62,24 +76,23 @@ def retrieve_all_threads():
     if not all_threads:
         return []
 
-    # Order threads by their most recent message timestamp (descending)
-    placeholders = ",".join("?" for _ in all_threads)
-    cursor = conn.execute(
-        f"""
-        SELECT thread_id, MAX(timestamp) as last_active
-        FROM message_timestamps
-        WHERE thread_id IN ({placeholders})
-        GROUP BY thread_id
-        ORDER BY last_active DESC
-        """,
-        list(all_threads),
-    )
+    with pool.connection() as conn:
+        cursor = conn.execute(
+            """
+            SELECT thread_id, MAX(timestamp) as last_active
+            FROM message_timestamps
+            WHERE thread_id = ANY(%s)
+            GROUP BY thread_id
+            ORDER BY last_active DESC
+            """,
+            (list(all_threads),),
+        )
 
-    ordered_threads = []
-    seen = set()
-    for row in cursor.fetchall():
-        ordered_threads.append(row[0])
-        seen.add(row[0])
+        ordered_threads = []
+        seen = set()
+        for row in cursor.fetchall():
+            ordered_threads.append(row[0])
+            seen.add(row[0])
 
     # Threads without any timestamps go at the end
     for thread_id in all_threads:
@@ -98,7 +111,8 @@ def thread_document_metadata(thread_id: str) -> dict:
 
 
 def delete_thread(thread_id: str):
-    conn.execute("DELETE FROM checkpoints WHERE thread_id = ?", (thread_id,))
-    conn.execute("DELETE FROM writes WHERE thread_id = ?", (thread_id,))
-    conn.execute("DELETE FROM message_timestamps WHERE thread_id = ?", (thread_id,))
-    conn.commit()
+    with pool.connection() as conn:
+        conn.execute("DELETE FROM checkpoints WHERE thread_id = %s", (thread_id,))
+        conn.execute("DELETE FROM checkpoint_writes WHERE thread_id = %s", (thread_id,))
+        conn.execute("DELETE FROM checkpoint_blobs WHERE thread_id = %s", (thread_id,))
+        conn.execute("DELETE FROM message_timestamps WHERE thread_id = %s", (thread_id,))
