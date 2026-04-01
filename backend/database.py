@@ -20,7 +20,9 @@ if not DATABASE_URL:
 # -------------------
 # Connection pool (each request gets its own connection — no prepared-statement conflicts)
 # -------------------
-pool = ConnectionPool(DATABASE_URL, min_size=2, max_size=10, kwargs={"autocommit": True})
+pool = ConnectionPool(
+    DATABASE_URL, min_size=2, max_size=10, kwargs={"autocommit": True}
+)
 
 # -------------------
 # Checkpointer
@@ -32,14 +34,38 @@ checkpointer.setup()
 # Message timestamps table
 # -------------------
 with pool.connection() as conn:
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS message_timestamps (
             id SERIAL PRIMARY KEY,
             thread_id TEXT NOT NULL,
             role TEXT NOT NULL,
             timestamp TEXT NOT NULL
         )
-    """)
+    """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users(
+            id SERIAL PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chat_threads(
+            thread_id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) references users(id)
+        )
+    """
+    )
 
 
 # -------------------
@@ -115,4 +141,33 @@ def delete_thread(thread_id: str):
         conn.execute("DELETE FROM checkpoints WHERE thread_id = %s", (thread_id,))
         conn.execute("DELETE FROM checkpoint_writes WHERE thread_id = %s", (thread_id,))
         conn.execute("DELETE FROM checkpoint_blobs WHERE thread_id = %s", (thread_id,))
-        conn.execute("DELETE FROM message_timestamps WHERE thread_id = %s", (thread_id,))
+        conn.execute(
+            "DELETE FROM message_timestamps WHERE thread_id = %s", (thread_id,)
+        )
+
+
+def create_user(email: str, password_hash: str):
+    with pool.connection() as conn:
+        row = conn.execute(
+            """INSERT INTO users (email, password_hash) VALUES (%s, %s) RETURNING id,email,created_at""",
+            (email, password_hash),
+        ).fetchone()
+
+        return {"id": row[0], "email": row[1], "created_at": row[2]}
+
+
+def get_all_users():
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT id, email,password_hash, created_at FROM users ORDER BY id"
+        ).fetchall()
+
+    return [
+        {
+            "id": row[0],
+            "email": row[1],
+            "password_hash": row[2],
+            "created_at": row[3],
+        }
+        for row in rows
+    ]
