@@ -1,12 +1,18 @@
-from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from datetime import datetime
+from typing import Annotated
+
+from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel, EmailStr
+
 from auth import (
     get_user_by_email,
     get_password_hash,
     authenticate_user,
     create_access_token,
+    get_current_user,
 )
-from database import create_user, get_all_users
+from database import create_user, delete_user
 
 router = APIRouter(prefix="/users", tags=["USER endpoints"])
 
@@ -16,10 +22,10 @@ class Request(BaseModel):
     password: str
 
 
-@router.get("/")
-async def list_users():
-    users = get_all_users()
-    return users
+class User(BaseModel):
+    id: int
+    email: EmailStr
+    created_at: datetime
 
 
 @router.post("/register")
@@ -49,9 +55,8 @@ async def register(req: Request):
 
 
 @router.post("/login")
-async def login(req: Request):
-    req_email = req.email.strip().lower()
-
+async def login(req: Annotated[OAuth2PasswordRequestForm, Depends()]):
+    req_email = req.username.strip().lower()
     user = authenticate_user(req_email, req.password)
 
     if not user:
@@ -63,3 +68,26 @@ async def login(req: Request):
     access_token = create_access_token({"sub": str(user["id"])})
 
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.get("/me", response_model=User)
+async def get_me(current_user: Annotated[dict, Depends(get_current_user)]):
+    return current_user
+
+
+@router.delete("/{user_id}")
+async def delete_user_by_id(
+    user: Annotated[dict, Depends(get_current_user)], user_id: int
+):
+    if user["id"] != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You cannot delete another user",
+        )
+    deleted = delete_user(user_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    return {"message": "User deleted successfully"}

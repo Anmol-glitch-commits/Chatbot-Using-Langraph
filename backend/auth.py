@@ -1,14 +1,15 @@
 import os
+from datetime import datetime, timedelta, timezone
+from typing import Annotated
 
 import jwt
-from jwt.exceptions import InvalidTokenError
-from pydantic import BaseModel
 from dotenv import load_dotenv
-from datetime import datetime, timedelta, timezone
-from fastapi.security import OAuth2PasswordBearer
 from fastapi import Depends, HTTPException, status
-from typing import Annotated
+from fastapi.security import OAuth2PasswordBearer
+from jwt.exceptions import InvalidTokenError
 from pwdlib import PasswordHash
+from pydantic import BaseModel, EmailStr
+
 from database import pool
 
 load_dotenv()
@@ -25,7 +26,7 @@ class Token(BaseModel):
 
 class User(BaseModel):
     id: int
-    email: str
+    email: EmailStr
     created_at: datetime
 
 
@@ -62,11 +63,11 @@ def get_user_by_email(email: str):
         }
 
 
-def get_user_by_id(id: int):
+def get_user_by_id(user_id: int):
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT id,email, password_hash, created_at FROM users WHERE id = %s",
-            (id,),
+            "SELECT id,email, created_at FROM users WHERE id = %s",
+            (user_id,),
         ).fetchone()
 
         if not row:
@@ -75,8 +76,7 @@ def get_user_by_id(id: int):
         return {
             "id": row[0],
             "email": row[1],
-            "password_hash": row[2],
-            "created_at": row[3],
+            "created_at": row[2],
         }
 
 

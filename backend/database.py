@@ -5,9 +5,9 @@ Standalone module — no circular deps.
 
 import os
 
-from psycopg_pool import ConnectionPool
-from langgraph.checkpoint.postgres import PostgresSaver
 from dotenv import load_dotenv
+from langgraph.checkpoint.postgres import PostgresSaver
+from psycopg_pool import ConnectionPool
 
 from pdf_ingestion import _THREAD_METADATA, _THREAD_RETRIEVERS
 
@@ -17,22 +17,14 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is required")
 
-# -------------------
-# Connection pool (each request gets its own connection — no prepared-statement conflicts)
-# -------------------
 pool = ConnectionPool(
     DATABASE_URL, min_size=2, max_size=10, kwargs={"autocommit": True}
 )
 
-# -------------------
-# Checkpointer
-# -------------------
+
 checkpointer = PostgresSaver(pool)
 checkpointer.setup()
 
-# -------------------
-# Message timestamps table
-# -------------------
 with pool.connection() as conn:
     conn.execute(
         """
@@ -68,9 +60,6 @@ with pool.connection() as conn:
     )
 
 
-# -------------------
-# Timestamp helpers
-# -------------------
 def save_timestamp(thread_id: str, role: str, timestamp: str):
     """Persist a single message timestamp to the database."""
     with pool.connection() as conn:
@@ -90,44 +79,6 @@ def get_timestamps(thread_id: str) -> list[dict]:
         return [{"role": row[0], "timestamp": row[1]} for row in cursor.fetchall()]
 
 
-# -------------------
-# Thread helpers
-# -------------------
-def retrieve_all_threads():
-    """Return all thread IDs, ordered by most recent activity (latest first)."""
-    all_threads = set()
-    for checkpoint in checkpointer.list(None):
-        all_threads.add(checkpoint.config["configurable"]["thread_id"])
-
-    if not all_threads:
-        return []
-
-    with pool.connection() as conn:
-        cursor = conn.execute(
-            """
-            SELECT thread_id, MAX(timestamp) as last_active
-            FROM message_timestamps
-            WHERE thread_id = ANY(%s)
-            GROUP BY thread_id
-            ORDER BY last_active DESC
-            """,
-            (list(all_threads),),
-        )
-
-        ordered_threads = []
-        seen = set()
-        for row in cursor.fetchall():
-            ordered_threads.append(row[0])
-            seen.add(row[0])
-
-    # Threads without any timestamps go at the end
-    for thread_id in all_threads:
-        if thread_id not in seen:
-            ordered_threads.append(thread_id)
-
-    return ordered_threads
-
-
 def thread_has_document(thread_id: str) -> bool:
     return str(thread_id) in _THREAD_RETRIEVERS
 
@@ -144,6 +95,7 @@ def delete_thread(thread_id: str):
         conn.execute(
             "DELETE FROM message_timestamps WHERE thread_id = %s", (thread_id,)
         )
+        conn.execute("DELETE FROM chat_threads WHERE thread_id = %s", (thread_id,))
 
 
 def create_user(email: str, password_hash: str):
@@ -156,18 +108,42 @@ def create_user(email: str, password_hash: str):
         return {"id": row[0], "email": row[1], "created_at": row[2]}
 
 
-def get_all_users():
+def delete_user(user_id: int) -> bool:
+    with pool.connection() as conn:
+        row = conn.execute(
+            "DELETE FROM users WHERE id = %s",
+            (user_id,),
+        )
+        deleted = row.rowcount > 0
+        return deleted
+
+
+def create_thread_for_user(thread_id: str, user_id: int):
+    with pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO chat_threads (thread_id,user_id) VALUES (%s,%s)",
+            (
+                thread_id,
+                user_id,
+            ),
+        )
+
+
+def get_all_threads_for_user(user_id: int):
     with pool.connection() as conn:
         rows = conn.execute(
-            "SELECT id, email,password_hash, created_at FROM users ORDER BY id"
+            "SELECT thread_id FROM chat_threads WHERE user_id = %s ORDER BY created_at DESC",
+            (user_id,),
         ).fetchall()
 
-    return [
-        {
-            "id": row[0],
-            "email": row[1],
-            "password_hash": row[2],
-            "created_at": row[3],
-        }
-        for row in rows
-    ]
+        return [row[0] for row in rows]
+
+
+def get_thread_owner(thread_id: str):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM chat_threads WHERE thread_id = %s",
+            (thread_id,),
+        ).fetchone()
+
+        return row[0] if row else None
