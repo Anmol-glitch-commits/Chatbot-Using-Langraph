@@ -18,7 +18,7 @@ router = APIRouter(prefix="/users", tags=["USER endpoints"])
 
 
 class Request(BaseModel):
-    email: str
+    email: EmailStr
     password: str
 
 

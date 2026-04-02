@@ -18,6 +18,12 @@ SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 ALGORITHM = os.getenv("JWT_ALGORITHM")
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
+if not SECRET_KEY:
+    raise RuntimeError("JWT_SECRET_KEY environment variable is required")
+
+if not ALGORITHM:
+    raise RuntimeError("JWT_ALGORITHM environment variable is required")
+
 
 class Token(BaseModel):
     access_token: str

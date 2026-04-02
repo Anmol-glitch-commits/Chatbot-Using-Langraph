@@ -54,7 +54,7 @@ with pool.connection() as conn:
             thread_id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(user_id) references users(id)
+            FOREIGN KEY(user_id) references users(id) ON DELETE CASCADE
         )
     """
     )
