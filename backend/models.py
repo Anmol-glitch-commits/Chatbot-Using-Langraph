@@ -12,21 +12,14 @@ from langchain_huggingface import (
 
 load_dotenv()
 
-# -------------------
-# LLM
-# -------------------
+
 llm = HuggingFaceEndpoint(
     repo_id="Qwen/Qwen2.5-7B-Instruct",
     task="text-generation",
     temperature=0.7,
 )
 
-# -------------------
-# Embeddings (for RAG / FAISS)
-# -------------------
+
 embeddings = HuggingFaceEmbeddings(model="sentence-transformers/all-MiniLM-L6-v2")
 
-# -------------------
-# Chat model wrapper
-# -------------------
 model = ChatHuggingFace(llm=llm)
